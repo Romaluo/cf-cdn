@@ -25,7 +25,8 @@ cd "$SCRIPT_DIR"
 echo -e "工作目录: $SCRIPT_DIR\n"
 
 # ==================== 配置 ====================
-TASK_INTERVAL_MINUTES=5
+RUN_HOUR=5
+RUN_MINUTE=0
 PYTHON_SCRIPT="main.py"
 # =============================================
 
@@ -133,15 +134,12 @@ echo ""
 # ---------- 2. 安装 Python 依赖（requests, aiohttp, brotlicffi）----------
 echo -e "${GREEN}[2/4] 检查并安装 Python 依赖...${NC}"
 
-# 先升级 pip，保证安装过程顺利
-python3 -m pip install --upgrade pip --quiet
-
 # 检查并安装 requests
 if python3 -m pip show requests &> /dev/null; then
     echo -e "  ✅ requests 已安装"
 else
     echo -e "${YELLOW}  安装 requests...${NC}"
-    python3 -m pip install requests --quiet
+    python3 -m pip install requests --quiet --break-system-packages
     if python3 -m pip show requests &> /dev/null; then
         echo -e "  ✅ requests 安装完成"
     else
@@ -155,7 +153,7 @@ if python3 -m pip show aiohttp &> /dev/null; then
     echo -e "  ✅ aiohttp 已安装"
 else
     echo -e "${YELLOW}  安装 aiohttp...${NC}"
-    python3 -m pip install aiohttp --quiet
+    python3 -m pip install aiohttp --quiet --break-system-packages
     if python3 -m pip show aiohttp &> /dev/null; then
         echo -e "  ✅ aiohttp 安装完成"
     else
@@ -176,11 +174,11 @@ fi
 
 if [ "$brotli_ok" = false ]; then
     echo -e "${YELLOW}  安装 brotlicffi（解压支持）...${NC}"
-    if python3 -m pip install brotlicffi --quiet 2>/dev/null; then
+    if python3 -m pip install brotlicffi --quiet --break-system-packages 2>/dev/null; then
         echo -e "  ✅ brotlicffi 安装完成"
     else
         echo -e "${YELLOW}  ⚠️ brotlicffi 安装失败，尝试安装 brotli...${NC}"
-        python3 -m pip install brotli --quiet
+        python3 -m pip install brotli --quiet --break-system-packages
         if python3 -m pip show brotli &> /dev/null; then
             echo -e "  ✅ brotli 安装完成"
         else
@@ -208,25 +206,11 @@ if [ ! -f "$PYTHON_SCRIPT" ]; then
 fi
 
 # ---------- 4. 配置 cron 定时任务 ----------
-echo -e "${GREEN}[4/4] 配置定时任务（每${TASK_INTERVAL_MINUTES}分钟运行一次）...${NC}"
+echo -e "${GREEN}[4/4] 配置定时任务（每天早上${RUN_HOUR}点${RUN_MINUTE}分运行一次）...${NC}"
 
-calc_next_aligned() {
-    local interval=$1
-    local current_min=$(date +%M)
-    local current_hour=$(date +%H)
-    local next_min=$(( ((current_min / interval) + 1) * interval ))
-    local next_hour=$current_hour
-    if [ $next_min -ge 60 ]; then
-        next_min=0
-        next_hour=$(( (next_hour + 1) % 24 ))
-    fi
-    printf "%02d:%02d" $next_hour $next_min
-}
+NEXT_RUN=$(date -d "today ${RUN_HOUR}:${RUN_MINUTE}" +"%Y-%m-%d %H:%M")
+echo -e "   下次运行时间: ${CYAN}$NEXT_RUN${NC}（每天同一时间运行）"
 
-NEXT_RUN=$(calc_next_aligned $TASK_INTERVAL_MINUTES)
-echo -e "   首次运行将发生在: ${CYAN}$NEXT_RUN${NC}（之后每 ${TASK_INTERVAL_MINUTES} 分钟运行一次）"
-
-CRON_MINUTE_FIELD="*/5"
 PYTHON_PATH=$(which python3)
 
 if [[ $EUID -eq 0 ]]; then
@@ -237,14 +221,14 @@ else
     NICE_PREFIX=""
 fi
 
-CRON_CMD="$CRON_MINUTE_FIELD * * * * cd \"$SCRIPT_DIR\" && $NICE_PREFIX \"$PYTHON_PATH\" \"$SCRIPT_DIR/$PYTHON_SCRIPT\" >> \"$SCRIPT_DIR/cron.log\" 2>&1"
-CRON_COMMENT="# Cloudflare IP 优选工具定时任务（每5分钟，整点对齐）"
+CRON_CMD="${RUN_MINUTE} ${RUN_HOUR} * * * cd \"$SCRIPT_DIR\" && $NICE_PREFIX \"$PYTHON_PATH\" \"$SCRIPT_DIR/$PYTHON_SCRIPT\" >> \"$SCRIPT_DIR/cron.log\" 2>&1"
+CRON_COMMENT="# Cloudflare IP 优选工具定时任务（每天早上${RUN_HOUR}点${RUN_MINUTE}分运行）"
 
 if crontab -l 2>/dev/null | grep -F "$SCRIPT_DIR/$PYTHON_SCRIPT" > /dev/null; then
     echo -e "${YELLOW}⚠️ 定时任务已存在，跳过添加。${NC}"
 else
     (crontab -l 2>/dev/null || true; echo "$CRON_COMMENT"; echo "$CRON_CMD") | crontab -
-    echo -e "${GREEN}✅ 定时任务已添加（每${TASK_INTERVAL_MINUTES}分钟，从下一个整5分钟开始）${NC}"
+    echo -e "${GREEN}✅ 定时任务已添加（每天早上${RUN_HOUR}点${RUN_MINUTE}分运行）${NC}"
 fi
 
 echo -e "   执行命令: $NICE_PREFIX $PYTHON_PATH $SCRIPT_DIR/$PYTHON_SCRIPT"
